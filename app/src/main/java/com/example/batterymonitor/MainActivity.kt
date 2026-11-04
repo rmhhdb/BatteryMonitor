@@ -1,347 +1,221 @@
-package com.example.batterymonitor
+package batterymonitor
 
 import android.app.Activity
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.content.*
 import android.os.BatteryManager
-import android.graphics.*
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.graphics.Color
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.view.Gravity
 import android.view.View
 import android.widget.*
-import android.view.Gravity
+import android.graphics.Typeface
+import android.os.Handler
+import android.os.Looper
+import java.text.SimpleDateFormat
+import java.util.*
 
 class MainActivity : Activity() {
 
     private lateinit var batteryText: TextView
-    private lateinit var voltageText: TextView
-    private lateinit var temperatureText: TextView
-    private lateinit var healthText: TextView
-    private lateinit var currentText: TextView
-    private lateinit var graph: BatteryGraphView
+    private lateinit var statusText: TextView
+    private lateinit var graphView: BatteryGraphView
 
-    private val history = mutableListOf<Int>()
+    private val levels = mutableListOf<Float>()
     private val handler = Handler(Looper.getMainLooper())
-
-    private val prefs by lazy {
-        getSharedPreferences("battery_data", MODE_PRIVATE)
-    }
 
     private val updateTask = object : Runnable {
         override fun run() {
-            readBattery()
+            updateBattery()
             handler.postDelayed(this, 60000)
-        }
-    }
-
-    private val batteryReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent != null) {
-                showBatteryInfo(intent)
-            }
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        loadHistory()
-        createScreen()
-        readBattery()
-    }
-
-    private fun createScreen() {
-
-        val root = LinearLayout(this)
-        root.orientation = LinearLayout.VERTICAL
-        root.setPadding(20, 20, 20, 20)
-        root.setBackgroundColor(Color.rgb(245, 247, 250))
-
-        val scroll = ScrollView(this)
-        scroll.addView(root)
+        val layout = LinearLayout(this)
+        layout.orientation = LinearLayout.VERTICAL
+        layout.setPadding(30, 40, 30, 30)
+        layout.setBackgroundColor(Color.rgb(245, 247, 250))
 
         val title = TextView(this)
-        title.text = "پایشگر هوشمند باتری"
-        title.textSize = 24f
+        title.text = "پایش مصرف باتری"
+        title.textSize = 25f
+        title.setTextColor(Color.rgb(30, 50, 80))
         title.gravity = Gravity.CENTER
-        title.setTextColor(Color.rgb(20, 60, 100))
-        title.setPadding(10, 20, 10, 25)
+        title.setTypeface(null, Typeface.BOLD)
+        layout.addView(title)
 
-        root.addView(title)
+        batteryText = TextView(this)
+        batteryText.textSize = 48f
+        batteryText.setTextColor(Color.rgb(20, 140, 80))
+        batteryText.gravity = Gravity.CENTER
+        batteryText.setPadding(0, 30, 0, 10)
+        layout.addView(batteryText)
 
-        batteryText = makeText("درصد باتری: --%", 30f)
-        root.addView(batteryText)
+        statusText = TextView(this)
+        statusText.textSize = 16f
+        statusText.setTextColor(Color.DKGRAY)
+        statusText.gravity = Gravity.CENTER
+        layout.addView(statusText)
 
-        voltageText = makeText("ولتاژ: --", 18f)
-        root.addView(voltageText)
+        graphView = BatteryGraphView(this)
 
-        temperatureText = makeText("دمای باتری: --", 18f)
-        root.addView(temperatureText)
-
-        healthText = makeText("سلامت باتری: --", 18f)
-        root.addView(healthText)
-
-        currentText = makeText("جریان باتری: --", 18f)
-        root.addView(currentText)
-
-        val graphTitle = makeText("نمودار تغییرات شارژ باتری", 20f)
-        root.addView(graphTitle)
-
-        graph = BatteryGraphView(this, history)
-
-        root.addView(
-            graph,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                230
-            )
+        val graphParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 450
         )
 
-        val historyTitle = makeText("تعداد نمونه های ثبت شده", 17f)
-        root.addView(historyTitle)
+        graphParams.setMargins(0, 30, 0, 20)
+        layout.addView(graphView, graphParams)
 
-        val historyCount = makeText("", 16f)
-        root.addView(historyCount)
+        val info = TextView(this)
+        info.text = "نمودار تغییرات درصد باتری در طول زمان"
+        info.textSize = 14f
+        info.gravity = Gravity.CENTER
+        info.setTextColor(Color.DKGRAY)
+        layout.addView(info)
 
-        val exportButton = Button(this)
-        exportButton.text = "خروجی گرفتن از اطلاعات (CSV)"
-        root.addView(exportButton)
-
-        exportButton.setOnClickListener {
-            exportCSV()
+        val refresh = Button(this)
+        refresh.text = "بروزرسانی"
+        refresh.setOnClickListener {
+            updateBattery()
         }
+        layout.addView(refresh)
 
-        setContentView(scroll)
+        setContentView(layout)
+
+        updateBattery()
+        handler.postDelayed(updateTask, 60000)
     }
 
-    private fun makeText(value: String, size: Float): TextView {
-        val text = TextView(this)
-        text.text = value
-        text.textSize = size
-        text.gravity = Gravity.CENTER
-        text.setTextColor(Color.DKGRAY)
-        text.setPadding(8, 12, 8, 12)
-        return text
-    }
+    private fun updateBattery() {
 
-    private fun readBattery() {
         val intent = registerReceiver(
             null,
             IntentFilter(Intent.ACTION_BATTERY_CHANGED)
         )
 
-        if (intent != null) {
-            showBatteryInfo(intent)
-        }
-    }
-
-    private fun showBatteryInfo(intent: Intent) {
-
-        val level = intent.getIntExtra(
+        val level = intent?.getIntExtra(
             BatteryManager.EXTRA_LEVEL, -1
-        )
+        ) ?: -1
 
-        val scale = intent.getIntExtra(
+        val scale = intent?.getIntExtra(
             BatteryManager.EXTRA_SCALE, 100
-        )
+        ) ?: 100
 
-        val percent = if (scale > 0) {
-            level * 100 / scale
-        } else {
-            0
-        }
+        if (level >= 0 && scale > 0) {
 
-        val voltage = intent.getIntExtra(
-            BatteryManager.EXTRA_VOLTAGE, 0
-        ) / 1000f
+            val percent = level * 100f / scale
 
-        val temperature = intent.getIntExtra(
-            BatteryManager.EXTRA_TEMPERATURE, 0
-        ) / 10f
+            batteryText.text = "${percent.toInt()}٪"
 
-        val health = intent.getIntExtra(
-            BatteryManager.EXTRA_HEALTH, 0
-        )
+            val status = intent?.getIntExtra(
+                BatteryManager.EXTRA_STATUS, -1
+            )
 
-        val manager = getSystemService(BATTERY_SERVICE)
-                as BatteryManager
-
-        val current = manager.getIntProperty(
-            BatteryManager.BATTERY_PROPERTY_CURRENT_NOW
-        )
-
-        batteryText.text = "شارژ باقی مانده: $percent٪"
-
-        voltageText.text = "ولتاژ باتری: $voltage ولت"
-
-        temperatureText.text =
-            "دمای باتری: $temperature درجه"
-
-        healthText.text = "وضعیت سلامت: ${healthName(health)}"
-
-        currentText.text =
-            "جریان لحظه ای: ${current / 1000} میلی آمپر"
-
-        if (history.isEmpty() || history.last() != percent) {
-            history.add(percent)
-
-            if (history.size > 1440) {
-                history.removeAt(0)
+            statusText.text = when (status) {
+                BatteryManager.BATTERY_STATUS_CHARGING -> "در حال شارژ"
+                BatteryManager.BATTERY_STATUS_FULL -> "شارژ کامل"
+                else -> "در حال استفاده"
             }
 
-            saveHistory()
-            graph.invalidate()
-        }
+            levels.add(percent)
 
-        val count = findViewById<ScrollView>(android.R.id.content)
-        // اطلاعات نمودار با هر تغییر به روز می شود.
-    }
+            if (levels.size > 60) {
+                levels.removeAt(0)
+            }
 
-    private fun healthName(value: Int): String {
-        return when (value) {
-            BatteryManager.BATTERY_HEALTH_GOOD -> "خوب"
-            BatteryManager.BATTERY_HEALTH_OVERHEAT -> "بیش از حد گرم"
-            BatteryManager.BATTERY_HEALTH_DEAD -> "خراب"
-            BatteryManager.BATTERY_HEALTH_OVER_VOLTAGE -> "ولتاژ بالا"
-            BatteryManager.BATTERY_HEALTH_COLD -> "سرد"
-            else -> "نامشخص"
+            graphView.setData(levels.toList())
         }
     }
 
-    private fun saveHistory() {
-        prefs.edit().putString(
-            "history",
-            history.joinToString(",")
-        ).apply()
-    }
-
-    private fun loadHistory() {
-        val saved = prefs.getString("history", "") ?: ""
-
-        if (saved.isNotEmpty()) {
-            history.addAll(
-                saved.split(",").mapNotNull { it.toIntOrNull() }
-            )
-        }
-    }
-
-    private fun exportCSV() {
-
-        val data = StringBuilder()
-        data.append("شماره,درصد باتری\n")
-
-        history.forEachIndexed { index, value ->
-            data.append("${index + 1},$value\n")
-        }
-
-        val sendIntent = Intent(Intent.ACTION_SEND)
-        sendIntent.type = "text/csv"
-        sendIntent.putExtra(
-            Intent.EXTRA_TEXT,
-            data.toString()
-        )
-
-        startActivity(
-            Intent.createChooser(sendIntent, "ارسال اطلاعات باتری")
-        )
-    }
-
-    override fun onResume() {
-        super.onResume()
-
-        registerReceiver(
-            batteryReceiver,
-            IntentFilter(Intent.ACTION_BATTERY_CHANGED)
-        )
-
-        handler.post(updateTask)
-    }
-
-    override fun onPause() {
-        super.onPause()
-
+    override fun onDestroy() {
+        super.onDestroy()
         handler.removeCallbacks(updateTask)
-        unregisterReceiver(batteryReceiver)
     }
 }
 
-class BatteryGraphView(
-    context: Context,
-    private val values: List<Int>
-) : View(context) {
+class BatteryGraphView(context: Context) : View(context) {
 
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val linePaint = Paint().apply {
+        color = Color.rgb(20, 140, 80)
+        strokeWidth = 5f
+        style = Paint.Style.STROKE
+        isAntiAlias = true
+    }
+
+    private val gridPaint = Paint().apply {
+        color = Color.LTGRAY
+        strokeWidth = 2f
+    }
+
+    private val textPaint = Paint().apply {
+        color = Color.DKGRAY
+        textSize = 28f
+        isAntiAlias = true
+    }
+
+    private var data = listOf<Float>()
+
+    fun setData(values: List<Float>) {
+        data = values
+        invalidate()
+    }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
-        val w = width.toFloat()
-        val h = height.toFloat()
+        val left = 65f
+        val right = width - 25f
+        val top = 30f
+        val bottom = height - 40f
 
-        paint.color = Color.WHITE
-        canvas.drawRoundRect(0f, 0f, w, h, 18f, 18f, paint)
-
-        val left = 55f
-        val right = w - 20f
-        val top = 20f
-        val bottom = h - 35f
-
-        paint.color = Color.LTGRAY
-        paint.strokeWidth = 1f
+        canvas.drawColor(Color.WHITE)
 
         for (i in 0..4) {
             val y = top + (bottom - top) * i / 4
-            canvas.drawLine(left, y, right, y, paint)
-        }
 
-        paint.color = Color.DKGRAY
-        paint.textSize = 24f
+            canvas.drawLine(
+                left, y, right, y, gridPaint
+            )
 
-        for (i in 0..4) {
-            val y = top + (bottom - top) * i / 4
             canvas.drawText(
                 "${100 - i * 25}%",
-                3f,
-                y + 8f,
-                paint
+                5f, y + 8f, textPaint
             )
         }
 
-        if (values.size < 2) {
-            paint.textSize = 26f
+        if (data.size < 2) {
             canvas.drawText(
-                "در انتظار ثبت اطلاعات...",
+                "در حال جمع آوری اطلاعات...",
                 left + 10f,
-                h / 2,
-                paint
+                height / 2f,
+                textPaint
             )
             return
         }
 
-        val path = Path()
+        val path = android.graphics.Path()
 
-        values.forEachIndexed { index, value ->
+        for (i in data.indices) {
 
             val x = left +
-                    (right - left) * index /
-                    (values.size - 1).toFloat()
+                (right - left) * i / (data.size - 1)
 
             val y = bottom -
-                    (bottom - top) * value / 100f
+                (data[i] / 100f) * (bottom - top)
 
-            if (index == 0) {
+            if (i == 0) {
                 path.moveTo(x, y)
             } else {
                 path.lineTo(x, y)
             }
         }
 
-        paint.color = Color.rgb(20, 130, 220)
-        paint.strokeWidth = 5f
-        paint.style = Paint.Style.STROKE
-
-        canvas.drawPath(path, paint)
-
-        paint.style = Paint.Style.FILL
+        canvas.drawPath(path, linePaint)
     }
 }
