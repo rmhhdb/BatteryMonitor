@@ -6,6 +6,7 @@ plugins {
 android {
     namespace 'com.example.batterymonitor'
     compileSdk 35
+
     defaultConfig {
         applicationId 'com.example.batterymonitor'
         minSdk 23
