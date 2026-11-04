@@ -1,33 +1,27 @@
-name: Build Battery Monitor APK
+steps:
+  - name: Get source code
+    uses: actions/checkout@v4
 
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
+  - name: Install Java
+    uses: actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: 17
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+  - name: Setup Gradle
+    uses: gradle/actions/setup-gradle@v4
 
-    steps:
-      - name: Get source code
-        uses: actions/checkout@v4
+  - name: Check project files
+    run: |
+      pwd
+      ls -la
+      find . -maxdepth 3 -type f | sort
 
-      - name: Install Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
+  - name: Build APK
+    run: gradle -p . assembleDebug
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Build APK
-        run: gradle assembleDebug
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: BatteryMonitor-APK
-          path: app/build/outputs/apk/debug/*.apk
+  - name: Upload APK
+    uses: actions/upload-artifact@v4
+    with:
+      name: BatteryMonitor-APK
+      path: app/build/outputs/apk/debug/*.apk
