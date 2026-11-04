@@ -1,6 +1,10 @@
+
 package com.example.batterymonitor
 
 import android.os.Bundle
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
@@ -14,11 +18,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import android.content.Intent
-import android.content.IntentFilter
-import android.os.BatteryManager
 import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
@@ -32,17 +34,13 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun BatteryScreen() {
+    val context = LocalContext.current
+
     var battery by remember { mutableIntStateOf(0) }
+    var temperature by remember { mutableIntStateOf(0) }
+    var voltage by remember { mutableIntStateOf(0) }
+    var charging by remember { mutableStateOf(false) }
     var history by remember { mutableStateOf(listOf<Int>()) }
-
-    LaunchedEffect(Unit) {
-        while (true) {
-            val intent = androidx.compose.ui.platform.LocalContext.current
-            delay(5000)
-        }
-    }
-
-    val context = androidx.compose.ui.platform.LocalContext.current
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -50,10 +48,38 @@ fun BatteryScreen() {
                 null,
                 IntentFilter(Intent.ACTION_BATTERY_CHANGED)
             )
-            val level = batteryIntent?.getIntExtra(BatteryManager.EXTRA_LEVEL, 0) ?: 0
-            val scale = batteryIntent?.getIntExtra(BatteryManager.EXTRA_SCALE, 100) ?: 100
-            battery = (level * 100) / scale
-            history = (history + battery).takeLast(30)
+
+            batteryIntent?.let {
+                val level = it.getIntExtra(
+                    BatteryManager.EXTRA_LEVEL, 0
+                )
+                val scale = it.getIntExtra(
+                    BatteryManager.EXTRA_SCALE, 100
+                )
+
+                battery = if (scale > 0) {
+                    level * 100 / scale
+                } else 0
+
+                temperature = it.getIntExtra(
+                    BatteryManager.EXTRA_TEMPERATURE, 0
+                )
+
+                voltage = it.getIntExtra(
+                    BatteryManager.EXTRA_VOLTAGE, 0
+                )
+
+                val status = it.getIntExtra(
+                    BatteryManager.EXTRA_STATUS, -1
+                )
+
+                charging =
+                    status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                    status == BatteryManager.BATTERY_STATUS_FULL
+
+                history = (history + battery).takeLast(60)
+            }
+
             delay(60000)
         }
     }
@@ -66,9 +92,13 @@ fun BatteryScreen() {
                 .padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("Battery Monitor", color = Color.White, fontSize = 25.sp)
+            Text(
+                "BATTERY MONITOR",
+                color = Color.White,
+                fontSize = 25.sp
+            )
 
-            Spacer(modifier = Modifier.height(35.dp))
+            Spacer(Modifier.height(30.dp))
 
             Text(
                 "$battery%",
@@ -76,19 +106,63 @@ fun BatteryScreen() {
                 fontSize = 65.sp
             )
 
-            Text("Remaining Battery", color = Color.LightGray)
+            Text(
+                "Remaining Battery",
+                color = Color.LightGray
+            )
 
-            Spacer(modifier = Modifier.height(35.dp))
+            Spacer(Modifier.height(20.dp))
 
-            Text("Battery History", color = Color.White, fontSize = 20.sp)
+            Text(
+                if (charging) "Charging" else "Discharging",
+                color = if (charging) Color(0xFF00E676)
+                        else Color(0xFFFFB74D),
+                fontSize = 18.sp
+            )
 
-            Spacer(modifier = Modifier.height(15.dp))
+            Spacer(Modifier.height(30.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Temperature", color = Color.LightGray)
+                    Text(
+                        "%.1f °C".format(temperature / 10f),
+                        color = Color.White,
+                        fontSize = 20.sp
+                    )
+                }
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Voltage", color = Color.LightGray)
+                    Text(
+                        "$voltage mV",
+                        color = Color.White,
+                        fontSize = 20.sp
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(35.dp))
+
+            Text(
+                "Battery History",
+                color = Color.White,
+                fontSize = 20.sp
+            )
+
+            Spacer(Modifier.height(15.dp))
 
             Canvas(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(220.dp)
-                    .background(Color(0xFF1D2A35), RoundedCornerShape(12.dp))
+                    .background(
+                        Color(0xFF1D2A35),
+                        RoundedCornerShape(12.dp)
+                    )
                     .padding(10.dp)
             ) {
                 if (history.size > 1) {
@@ -97,21 +171,25 @@ fun BatteryScreen() {
 
                     history.forEachIndexed { index, value ->
                         val x = index * stepX
-                        val y = size.height - (value / 100f * size.height)
+                        val y = size.height -
+                            (value / 100f * size.height)
 
-                        if (index == 0) path.moveTo(x, y)
-                        else path.lineTo(x, y)
+                        if (index == 0) {
+                            path.moveTo(x, y)
+                        } else {
+                            path.lineTo(x, y)
+                        }
                     }
 
                     drawPath(
-                        path,
+                        path = path,
                         color = Color(0xFF00E676),
                         style = Stroke(width = 4f)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(Modifier.height(15.dp))
 
             Text(
                 "Updates every 60 seconds",
