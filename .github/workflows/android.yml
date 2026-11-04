@@ -1,4 +1,4 @@
-name: Build Battery Monitor APK
+name: Build Battery Monitor APK2
 
 on:
 workflow_dispatch:
